@@ -1,10 +1,9 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useRef, useState } from "react";
+import { connectWS } from "./ws";
 
-function App() {
+export default function App() {
+  const timer = useRef(null);
+  const socket = useRef(null);
   const [userName, setUserName] = useState("");
   const [showNamePopup, setShowNamePopup] = useState(true);
   const [inputName, setInputName] = useState("");
@@ -13,6 +12,60 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
 
+  useEffect(() => {
+    socket.current = connectWS();
+
+    socket.current.on("connect", () => {
+      socket.current.on("roomNotice", (userName) => {
+        console.log(`${userName} joined to group!`);
+      });
+
+      socket.current.on("chatMessage", (msg) => {
+        // push to existing messages list
+        console.log("msg", msg);
+        setMessages((prev) => [...prev, msg]);
+      });
+
+      socket.current.on("typing", (userName) => {
+        setTypers((prev) => {
+          const isExist = prev.find((typer) => typer === userName);
+          if (!isExist) {
+            return [...prev, userName];
+          }
+
+          return prev;
+        });
+      });
+
+      socket.current.on("stopTyping", (userName) => {
+        setTypers((prev) => prev.filter((typer) => typer !== userName));
+      });
+    });
+
+    return () => {
+      socket.current.off("roomNotice");
+      socket.current.off("chatMessage");
+      socket.current.off("typing");
+      socket.current.off("stopTyping");
+    };
+  }, []);
+
+  useEffect(() => {
+    if (text) {
+      socket.current.emit("typing", userName);
+      clearTimeout(timer.current);
+    }
+
+    timer.current = setTimeout(() => {
+      socket.current.emit("stopTyping", userName);
+    }, 1000);
+
+    return () => {
+      clearTimeout(timer.current);
+    };
+  }, [text, userName]);
+
+  // FORMAT TIMESTAMP TO HH:MM FOR MESSAGES
   function formatTime(ts) {
     const d = new Date(ts);
     const hh = String(d.getHours()).padStart(2, "0");
@@ -20,10 +73,14 @@ function App() {
     return `${hh}:${mm}`;
   }
 
+  // SUBMIT NAME TO GET STARTED, OPEN CHAT WINDOW WITH INITIAL MESSAGE
   function handleNameSubmit(e) {
     e.preventDefault();
     const trimmed = inputName.trim();
     if (!trimmed) return;
+
+    // join room
+    socket.current.emit("joinRoom", trimmed);
 
     setUserName(trimmed);
     setShowNamePopup(false);
@@ -42,6 +99,10 @@ function App() {
       ts: Date.now(),
     };
     setMessages((m) => [...m, msg]);
+
+    // emit
+    socket.current.emit("chatMessage", msg);
+
     setText("");
   }
 
@@ -168,5 +229,3 @@ function App() {
     </div>
   );
 }
-
-export default App
